@@ -1,4 +1,9 @@
+#ifndef TRANSACTION_H
+#define TRANSACTION_H
+
 #include <pthread.h>
+#include <stdbool.h>
+#include "bank.h"
 
 typedef enum {
     OP_DEPOSIT,   // Add money to account
@@ -35,3 +40,11 @@ typedef struct {
     // Status
     TxStatus status;
 } Transaction;
+
+// Function prototypes
+void parse_trace_file(const char* trace_file, Bank* bank);
+void* execute_transaction(void* arg);
+void wait_for_all_transactions(void);
+void print_transaction_summary(void);
+
+#endif
