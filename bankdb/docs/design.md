@@ -1,4 +1,4 @@
-# Design Documentation (design.md)
+# Design Documentation
 
 ## 1. Deadlock Strategy Choice
 
