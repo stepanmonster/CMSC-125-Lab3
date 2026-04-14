@@ -15,3 +15,7 @@ typedef struct {
     sem_t full_slots;
     pthread_mutex_t pool_lock;
 } BufferPool;
+
+void init_buffer_pool(BufferPool* pool);
+void load_account(BufferPool* pool, int account_id);
+void unload_account(BufferPool* pool, int account_id);

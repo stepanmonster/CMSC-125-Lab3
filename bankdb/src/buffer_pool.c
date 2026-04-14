@@ -1,3 +1,8 @@
+#include <stdio.h>
+#include <stdbool.h>   // Changed from <bool.h>
+#include <pthread.h>   // Required for pthread_mutex_t
+#include <semaphore.h> // Required for sem_t (sem_init, sem_wait, etc.)
+
 #include "../include/buffer_pool.h"
 
 void init_buffer_pool(BufferPool* pool) {
