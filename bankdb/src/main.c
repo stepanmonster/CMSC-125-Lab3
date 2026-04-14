@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "../include/transaction.h"
+#include "../include/bank.h"
 
 // Declare your function (if not in a header yet)
 Transaction* loadInput(const char *filename, int *out_count);

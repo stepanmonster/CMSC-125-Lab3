@@ -1,4 +1,5 @@
 #include <pthread.h>
+#define MAX_TRANSACTIONS 20
 
 typedef enum {
     OP_DEPOSIT,   // Add money to account

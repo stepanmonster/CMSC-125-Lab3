@@ -1,5 +1,9 @@
+#include <stdio.h>
+#include <stdbool.h>
+
 #include "../include/transaction.h"
 #include "../include/bank.h"
+#include "../include/timer.h"
 
 typedef struct {
     int tx_id;
