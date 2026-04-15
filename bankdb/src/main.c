@@ -1,72 +1,73 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include "../include/transaction.h"
-#include "../include/bank.h"
+#include <pthread.h>
+#include "bank.h"
+#include "transaction.h"
+#include "timer.h"
+#include "lock_mgr.h"
+#include "buffer_pool.h"
+#include "metrics.h"
 
-// Declare your function (if not in a header yet)
-Transaction* loadInput(const char *filename, int *out_count);
+/* Shared verbose flag (extern'd from transaction.c) */
+int verbose = 0;
 
-int main(int argc, char *argv[])
+/* Prototype from utils.c */
+void parse_args(int argc, char **argv,
+                const char **accounts_file,
+                const char **trace_file,
+                DeadlockStrategy *strategy,
+                int *tick_ms,
+                int *verbose_out);
+
+int main(int argc, char **argv)
 {
-    int global_tick = 0;
+    const char       *accounts_file = NULL;
+    const char       *trace_file    = NULL;
+    DeadlockStrategy  strategy      = DEADLOCK_PREVENTION;
+    int               tick_ms       = 100;
 
-    // 1. Check for input file
-    if (argc < 2) {
-        fprintf(stderr, "Usage: %s <input_file>\n", argv[0]);
-        return 1;
+    parse_args(argc, argv, &accounts_file, &trace_file,
+               &strategy, &tick_ms, &verbose);
+
+    printf("=== Banking System Execution Log ===\n");
+    printf("Deadlock strategy : %s\n",
+           strategy == DEADLOCK_PREVENTION ? "prevention" : "detection");
+
+    /* Initialise subsystems */
+    bank_init();
+    lock_mgr_init(strategy);
+    init_buffer_pool(&buffer_pool);
+    timer_init(tick_ms);
+
+    /* Load data */
+    if (!bank_load_accounts(accounts_file)) {
+        fprintf(stderr, "Failed to load accounts from %s\n", accounts_file);
+        return EXIT_FAILURE;
+    }
+    if (!load_transactions(trace_file)) {
+        fprintf(stderr, "Failed to load transactions from %s\n", trace_file);
+        return EXIT_FAILURE;
     }
 
-    // 2. Load transactions
-    int tx_count = 0;
-    Transaction *transactions = loadInput(argv[1], &tx_count);
+    int initial_total = bank_total_balance();
 
-    if (!transactions) {
-        fprintf(stderr, "Failed to load transactions\n");
-        return 1;
-    }
+    /* Start timer thread */
+    pthread_t timer_tid;
+    pthread_create(&timer_tid, NULL, timer_thread, NULL);
 
-    // 3. Debug print (VERY IMPORTANT for validation)
-    printf("Loaded %d transactions:\n\n", tx_count);
+    /* Run all transaction threads */
+    run_all_transactions();
 
-    for (int i = 0; i < tx_count; i++) {
-        Transaction *t = &transactions[i];
+    /* Stop timer */
+    timer_stop();
+    pthread_join(timer_tid, NULL);
 
-        printf("T%d | start_tick=%d | ops=%d\n",
-               t->tx_id, t->start_tick, t->num_ops);
+    /* Reports */
+    bank_print_all_balances();
+    print_transaction_metrics();
+    print_buffer_pool_stats(&buffer_pool);
+    metrics_print_summary();
+    metrics_check_conservation(initial_total);
 
-        for (int j = 0; j < t->num_ops; j++) {
-            Operation *op = &t->ops[j];
-
-            switch (op->type) {
-                case OP_DEPOSIT:
-                    printf("  DEPOSIT acc=%d amt=%d\n",
-                           op->account_id, op->amount_centavos);
-                    break;
-
-                case OP_WITHDRAW:
-                    printf("  WITHDRAW acc=%d amt=%d\n",
-                           op->account_id, op->amount_centavos);
-                    break;
-
-                case OP_TRANSFER:
-                    printf("  TRANSFER %d -> %d amt=%d\n",
-                           op->account_id,
-                           op->target_account,
-                           op->amount_centavos);
-                    break;
-
-                case OP_BALANCE:
-                    printf("  BALANCE acc=%d\n",
-                           op->account_id);
-                    break;
-            }
-        }
-
-        printf("\n");
-    }
-
-    // 4. Cleanup
-    free(transactions);
-
-    return 0;
+    return EXIT_SUCCESS;
 }
