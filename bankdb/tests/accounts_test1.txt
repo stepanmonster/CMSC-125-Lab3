@@ -1,0 +1,4 @@
+# Test 1 accounts — account 10 starts at PHP 0.00
+# After DEPOSIT 10000 centavos and WITHDRAW 2000 centavos: PHP 80.00
+10 0
+20 30000
