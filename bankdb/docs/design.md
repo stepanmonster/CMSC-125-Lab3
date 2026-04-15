@@ -39,7 +39,9 @@ All updates to the graph will be protected by a mutex to ensure consistency.
 
 We will use **Depth-First Search (DFS)** to detect cycles in the wait-for graph.
 
-Algorithm:
+**Trigger:** The deadlock detector will run each time a transaction blocks on a lock request. This ensures deadlocks are identified promptly rather than on a fixed polling interval.
+
+**Algorithm:**
 1. Maintain two arrays:
    - `visited[]` → tracks visited nodes
    - `rec_stack[]` → tracks recursion stack
@@ -64,7 +66,8 @@ When a deadlock is detected:
 
 After abort:
 - Locks held by the aborted transaction will be released
-- Other transactions will proceed
+- The aborted transaction will be **retried after a short delay** to ensure it eventually completes
+- Other transactions in the cycle will proceed
 
 ---
 
@@ -72,7 +75,7 @@ After abort:
 
 Deadlock detection will ensure:
 - The system may temporarily enter a deadlock state
-- However, **all deadlocks will eventually be detected and resolved**
+- However, **all deadlocks will eventually be detected and resolved**, since the detector runs on every lock block
 
 Thus:
 - The system will guarantee **progress (no permanent blocking)**
@@ -97,7 +100,7 @@ Accounts will be **loaded into the buffer pool upon first access within a transa
 
 Accounts will be **unloaded after the transaction completes (commit or abort)**.
 
-- This will ensure the account remains available throughout the transaction's execution
+- This will ensure the account remains available throughout the transaction's execution (equivalent to "pinning" in real buffer managers)
 - It will prevent repeated load/unload overhead within a transaction
 
 ---
@@ -106,14 +109,19 @@ Accounts will be **unloaded after the transaction completes (commit or abort)**.
 
 If the buffer pool is full:
 - The transaction will block on: `sem_wait(empty_slots)`
-
-- It will resume only when: `sem_post(empty_slots)`
-
-is triggered by another transaction unloading an account.
+- It will resume only when `sem_post(empty_slots)` is triggered by another transaction unloading an account
 
 This will guarantee:
 - No overflow of the fixed buffer size
 - Proper synchronization between producers and consumers
+
+---
+
+### Buffer Pool Deadlock Avoidance
+
+A subtle deadlock class can arise independently of lock contention: if T1 holds a buffer slot for Account A and blocks waiting for a slot for Account B, while T2 holds Account B's slot and blocks waiting for Account A's slot, the wait-for graph (which only tracks lock waits) will not detect this cycle.
+
+**Resolution strategy:** To eliminate this class of deadlock entirely, each transaction will **pre-load all required accounts into the buffer pool before acquiring any locks**. This ensures that by the time lock acquisition begins, all necessary buffer slots are already held, making circular buffer-pool waiting impossible.
 
 ---
 
@@ -154,12 +162,12 @@ Workload to be used:
 
 ### Expected Results
 
-| Lock Type | Total Ticks | Throughput (tx/tick) |
-|----------|------------|----------------------|
-| Mutex    | 8 ticks    | 0.50                 |
-| RWLock   | 3 ticks    | 1.33                 |
+> **Note:** The values below are predicted results based on expected concurrency behavior. Actual measurements will be recorded after implementation.
 
-*(Representative results based on expected behavior of concurrent reads)*
+| Lock Type | Total Ticks | Throughput (tx/tick) |
+|-----------|-------------|----------------------|
+| Mutex     | 8 ticks     | 0.50                 |
+| RWLock    | 3 ticks     | 1.33                 |
 
 ---
 
@@ -186,6 +194,12 @@ Since BALANCE operations do not modify data:
 
 ---
 
+### Known Trade-offs
+
+- **Writer starvation:** Under sustained read load, `pthread_rwlock_t` may starve write operations, since new readers can continuously acquire the lock before a waiting writer proceeds. This is acceptable for our read-heavy benchmark but is a known limitation of the reader-writer lock model.
+
+---
+
 ### Conclusion
 
 Reader-writer locks will:
@@ -202,6 +216,8 @@ Reader-writer locks will:
 The timer thread will maintain a **global logical clock (`global_tick`)** that:
 - Controls when transactions begin execution
 - Synchronizes all threads using condition variables
+
+`global_tick` will be protected by a dedicated mutex (`tick_mutex`), which will be held when calling `pthread_cond_wait()` and `pthread_cond_broadcast()`, as required by the POSIX condition variable API.
 
 ---
 
@@ -236,11 +252,11 @@ This would invalidate:
 ### How It Will Enable True Concurrency
 
 Each transaction will:
-- Wait until its scheduled start time using: `pthread_cond_wait()`
+- Wait until its scheduled start time using: `pthread_cond_wait(&tick_cond, &tick_mutex)`
 
 The timer thread will:
 - Increment `global_tick`
-- Wake all waiting threads via: `pthread_cond_broadcast()`
+- Wake all waiting threads via: `pthread_cond_broadcast(&tick_cond)`
 
 This will guarantee:
 - Transactions start at their designated ticks
