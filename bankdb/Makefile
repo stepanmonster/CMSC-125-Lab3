@@ -1,44 +1,75 @@
-CC     = gcc
-CFLAGS = -g -Wall -O0 -std=c99 -Iinclude
+CC      = gcc
+CFLAGS  = -Wall -Wextra -Iinclude -pthread -O2
+DBGFLAGS= -Wall -Wextra -Iinclude -pthread -g -fsanitize=thread
+LDFLAGS = -pthread
 
-# ─── Sources ─────────────────────────────────────────────────────────
-SOURCES = src/main.c     \
-          src/bank.c     \
-          src/buffer_pool.c      \
-          src/lock_mgr.c     \
-          src/metrics.c       \
-          src/timer.c  \
-          src/transaction.c    \
-          src/utils.c
+SRCS = src/main.c \
+       src/bank.c \
+       src/transaction.c \
+       src/timer.c \
+       src/lock_mgr.c \
+       src/buffer_pool.c \
+       src/metrics.c \
+       src/utils.c
 
-OBJECTS = $(SOURCES:.c=.o)
-TARGET  = bankdb
-HEADERS = include/bank.h   \
-          include/buffer_pool.h \
-          include/lock_mgr.h     \
-		  include/timer.h\
-		  include/transaction.h\
-          include/metrics.h
+OBJS     = $(SRCS:.c=.o)
+TARGET   = bankdb
+DBG_TARGET = bankdb_debug
 
-# ─── Build ───────────────────────────────────────────────────────────
+ACCOUNTS = tests/accounts.txt
+
+.PHONY: all debug clean test test1 test2 test3a test3b test4 test5
+
 all: $(TARGET)
-	@echo "Build complete. Cleaning object files..."
-	$(MAKE) clean-objects
 
-$(TARGET): $(OBJECTS)
-	$(CC) $(CFLAGS) -o $@ $^
+$(TARGET): $(SRCS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-%.o: %.c $(HEADERS)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-# ─── Cleanup ─────────────────────────────────────────────────────────
-.PHONY: all clean clean-objects test
-
-clean-objects:
-	rm -f $(OBJECTS)
+debug: $(SRCS)
+	$(CC) $(DBGFLAGS) -o $(DBG_TARGET) $^ $(LDFLAGS)
 
 clean:
-	rm -f $(OBJECTS) $(TARGET)
+	rm -f $(TARGET) $(DBG_TARGET) src/*.o
 
-test: $(TARGET)
-	@bash tests/test_suite.sh
+# ── Individual tests ──────────────────────────────────────────────────────────
+
+test1:
+	@echo "\n=== Test 1: No Conflicts ==="
+	./$(TARGET) --accounts=tests/accounts_test1.txt --trace=tests/trace_simple.txt \
+	            --deadlock=prevention --tick-ms=50 --verbose
+
+test2:
+	@echo "\n=== Test 2: Concurrent Readers ==="
+	./$(TARGET) --accounts=$(ACCOUNTS) --trace=tests/trace_readers.txt \
+	            --deadlock=prevention --tick-ms=50 --verbose
+
+test3a:
+	@echo "\n=== Test 3a: Deadlock Prevention ==="
+	./$(TARGET) --accounts=$(ACCOUNTS) --trace=tests/trace_deadlock.txt \
+	            --deadlock=prevention --tick-ms=50 --verbose
+
+test3b:
+	@echo "\n=== Test 3b: Deadlock Detection ==="
+	./$(TARGET) --accounts=$(ACCOUNTS) --trace=tests/trace_deadlock.txt \
+	            --deadlock=detection --tick-ms=50 --verbose
+
+test4:
+	@echo "\n=== Test 4: Insufficient Funds (Abort) ==="
+	./$(TARGET) --accounts=$(ACCOUNTS) --trace=tests/trace_abort.txt \
+	            --deadlock=prevention --tick-ms=50 --verbose
+
+test5:
+	@echo "\n=== Test 5: Buffer Pool Saturation ==="
+	./$(TARGET) --accounts=$(ACCOUNTS) --trace=tests/trace_buffer.txt \
+	            --deadlock=prevention --tick-ms=50 --verbose
+
+test: all test1 test2 test3a test3b test4 test5
+
+# ── ThreadSanitizer run ───────────────────────────────────────────────────────
+tsan: debug
+	@echo "\n=== ThreadSanitizer: trace_readers ==="
+	./$(DBG_TARGET) --accounts=$(ACCOUNTS) --trace=tests/trace_readers.txt \
+	                --deadlock=prevention --tick-ms=50
+	@echo "\n=== ThreadSanitizer: trace_deadlock (prevention) ==="
+	./$(DBG_TARGET) --accounts=$(ACCOUNTS) --trace=tests/trace_deadlock.txt \
+	                --deadlock=prevention --tick-ms=50

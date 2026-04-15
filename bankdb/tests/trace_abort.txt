@@ -1,0 +1,4 @@
+# Test 4: Insufficient Funds — account 10 has PHP 500.00 (50000 centavos)
+# Attempting to withdraw PHP 150.00 (15000 centavos) should succeed
+# Attempting to withdraw PHP 600.00 (60000 centavos) should abort
+T1 0 WITHDRAW 10 60000
